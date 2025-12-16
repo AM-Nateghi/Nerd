@@ -1,0 +1,497 @@
+/* ==================== متغیرهای تم ====================  */
+:root[data-theme="dark"] {
+  --bg: #080c18;
+  --panel: #0f172a;
+  --card: #11182b;
+  --accent: #76e4c3;
+  --accent-2: #7cb4ff;
+  --text: #e7ecf3;
+  --muted: #a7b5cc;
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow: 0 20px 80px rgba(0, 0, 0, 0.55);
+  --code-bg: #1e293b;
+  --code-border: #334155;
+}
+
+:root[data-theme="light"] {
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --card: #f1f5f9;
+  --accent: #10b981;
+  --accent-2: #3b82f6;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: rgba(0, 0, 0, 0.08);
+  --shadow: 0 20px 80px rgba(0, 0, 0, 0.08);
+  --code-bg: #f1f5f9;
+  --code-border: #cbd5e1;
+}
+
+:root {
+  --radius: 16px;
+  --font: "Space Grotesk", "Vazirmatn", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+  font-family: var(--font);
+  color: var(--text);
+  direction: rtl;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+[data-theme="dark"] body {
+  background: radial-gradient(
+      circle at 10% 20%,
+      rgba(118, 228, 195, 0.08),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 80% 0%,
+      rgba(124, 180, 255, 0.12),
+      transparent 30%
+    ),
+    var(--bg);
+}
+
+/* ==================== لانچر ====================  */
+#nerd-launcher {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: var(--bg);
+  border: none;
+  padding: 14px 20px;
+  border-radius: 50px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: var(--shadow);
+  transition: transform 0.2s ease;
+}
+
+#nerd-launcher:hover {
+  transform: translateY(-2px) scale(1.02);
+}
+
+#nerd-launcher i {
+  width: 20px;
+  height: 20px;
+}
+
+/* ==================== ویجت ====================  */
+#nerd-widget {
+  width: min(960px, 100%);
+  height: min(90vh, 760px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* ==================== هدر ====================  */
+.nerd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.nerd-head-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nerd-head-title img {
+  border-radius: 10px;
+}
+
+.nerd-kicker {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.nerd-head h1 {
+  font-size: 20px;
+  margin-top: 4px;
+  letter-spacing: -0.02em;
+}
+
+.nerd-head-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.nerd-head-actions button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.nerd-head-actions button:hover {
+  transform: translateY(-1px);
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.nerd-head-actions button i {
+  width: 18px;
+  height: 18px;
+}
+
+/* ==================== پیام‌ها ====================  */
+#nerd-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-behavior: smooth;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  text-align: center;
+  gap: 12px;
+}
+
+.empty-state i {
+  width: 48px;
+  height: 48px;
+  opacity: 0.5;
+}
+
+.message {
+  padding: 14px 16px;
+  border-radius: 14px;
+  max-width: 75%;
+  line-height: 1.7;
+  border: 1px solid var(--border);
+  animation: fadeIn 0.3s ease;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: linear-gradient(
+    135deg,
+    rgba(118, 228, 195, 0.15),
+    rgba(124, 180, 255, 0.15)
+  );
+  border-color: var(--accent);
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: var(--card);
+}
+
+.message img {
+  margin-top: 12px;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+/* Markdown در پیام‌ها */
+.message pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 10px 0;
+  overflow-x: auto;
+  direction: ltr;
+}
+
+.message code {
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: "Consolas", "Monaco", monospace;
+}
+
+.message pre code {
+  background: none;
+  padding: 0;
+}
+
+.message p {
+  margin: 8px 0;
+}
+
+.message ul,
+.message ol {
+  margin: 8px 0;
+  padding-right: 20px;
+}
+
+.message a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* ==================== لودینگ ====================  */
+.loading {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--card);
+  border-top: 1px solid var(--border);
+}
+
+.loading-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.loading-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.loading-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.loading-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+/* ==================== اینپوت ====================  */
+.nerd-input {
+  border-top: 1px solid var(--border);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--card);
+}
+
+.nerd-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.nerd-attachments {
+  display: flex;
+  gap: 6px;
+}
+
+.nerd-attachments button {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.nerd-attachments button:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.nerd-attachments button i {
+  width: 18px;
+  height: 18px;
+}
+
+#nerd-text {
+  flex: 1;
+  resize: none;
+  min-height: 40px;
+  max-height: 120px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  transition: all 0.2s ease;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+
+#nerd-text:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(118, 228, 195, 0.1);
+}
+
+#nerd-send {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: var(--bg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+#nerd-send:hover {
+  transform: translateY(-1px) scale(1.05);
+}
+
+#nerd-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+#nerd-send i {
+  width: 18px;
+  height: 18px;
+}
+
+.nerd-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+}
+
+.nerd-actions button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.nerd-actions button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.nerd-actions button i {
+  width: 14px;
+  height: 14px;
+}
+
+#nerd-status {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ==================== انیمیشن‌ها ====================  */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==================== اسکرول‌بار ====================  */
+#nerd-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+#nerd-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#nerd-messages::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 10px;
+}
+
+#nerd-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* ==================== ریسپانسیو ====================  */
+@media (max-width: 720px) {
+  body {
+    padding: 12px;
+  }
+
+  #nerd-widget {
+    height: 88vh;
+  }
+
+  .message {
+    max-width: 85%;
+  }
+
+  .nerd-attachments {
+    flex-direction: column;
+  }
+}

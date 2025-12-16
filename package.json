@@ -1,0 +1,17 @@
+{
+    "name": "nerd-agent",
+    "version": "0.1.0",
+    "type": "module",
+    "private": true,
+    "description": "Floating web widget for Nerd agent using Ollama gemma3n",
+    "scripts": {
+        "start": "node src/server.js",
+        "dev": "NODE_ENV=development node src/server.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.19.2",
+        "node-fetch": "^3.3.2",
+        "ollama": "^0.6.3"
+    }
+}
