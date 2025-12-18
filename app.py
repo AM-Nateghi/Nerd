@@ -1,11 +1,29 @@
 from transformers import pipeline
 import torch
+from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse
+
+app = FastAPI(title="BackNerd", version="0.1.0")
+
+app.mount("/static", StaticFiles(directory="public"))
+
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index():
+    with open("public/index.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+def initialize_model():
+    pass
 
 
 pipe = pipeline(
     "image-text-to-text",
     model="google/gemma-3n-e4b-it",
-    device="cuda",
+    device="auto",
     torch_dtype=torch.bfloat16,
 )
 
@@ -28,6 +46,3 @@ messages = [
 
 output = pipe(text=messages, max_new_tokens=200)
 print(output[0]["generated_text"][-1]["content"])
-# Okay, let's take a look!
-# Based on the image, the animal on the candy is a **turtle**.
-# You can see the shell shape and the head and legs.
