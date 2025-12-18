@@ -14,6 +14,14 @@ import uuid
 from datetime import datetime, timedelta
 import asyncio
 import logging
+import os
+from pathlib import Path
+from contextlib import asynccontextmanager
+import warnings
+
+# سرکوب warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # تنظیم لاگ
 logging.basicConfig(
@@ -23,11 +31,71 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ساخت اپلیکیشن FastAPI
+# ذخیره موقت تصاویر در حافظه
+image_store: Dict[str, Dict[str, Any]] = {}
+
+# مدل Gemma3n
+pipe = None
+
+
+# تابع برای expand کردن مسیر home
+def expand_path(path: str) -> str:
+    """تبدیل ~ به مسیر کامل home directory"""
+    return str(Path(path).expanduser().resolve())
+
+
+# لود کردن تنظیمات از environment variables
+MODEL_PATH = os.getenv("MODEL_PATH", "google/gemma-3n-e4b-it")
+MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "2048"))
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
+
+# اگر مسیر لوکال هست، expand کن
+if MODEL_PATH.startswith("~") or MODEL_PATH.startswith("/"):
+    MODEL_PATH = expand_path(MODEL_PATH)
+    logger.info(f"📂 مسیر مدل لوکال: {MODEL_PATH}")
+
+
+# Lifespan context manager (جایگزین on_event)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global pipe
+    logger.info("🚀 در حال بارگذاری مدل Gemma3n-e4b...")
+
+    try:
+        # بررسی وجود مسیر لوکال
+        if os.path.exists(MODEL_PATH):
+            logger.info(f"✅ مدل از مسیر لوکال بارگذاری می‌شود: {MODEL_PATH}")
+        else:
+            logger.info(f"📥 مدل از Hugging Face Hub دانلود می‌شود: {MODEL_PATH}")
+
+        pipe = pipeline(
+            "image-text-to-text",
+            model=MODEL_PATH,
+            device="auto",
+            torch_dtype=torch.bfloat16,
+        )
+        logger.info("✅ مدل با موفقیت بارگذاری شد!")
+    except Exception as e:
+        logger.error(f"❌ خطا در بارگذاری مدل: {e}")
+        logger.error(f"💡 مسیر مورد استفاده: {MODEL_PATH}")
+        logger.error(
+            f"💡 برای استفاده از مسیر لوکال، متغیر محیطی MODEL_PATH را تنظیم کنید"
+        )
+        pipe = None
+
+    yield
+
+    # Shutdown
+    logger.info("🛑 در حال خاموش شدن سرور...")
+
+
+# ساخت اپلیکیشن FastAPI با lifespan
 app = FastAPI(
     title="Nerd Agent Server",
     version="0.1.0",
     description="FastAPI backend with Gemma3n-e4b model",
+    lifespan=lifespan,
 )
 
 # تنظیم CORS
@@ -38,12 +106,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ذخیره موقت تصاویر در حافظه
-image_store: Dict[str, Dict[str, Any]] = {}
-
-# مدل Gemma3n
-pipe = None
 
 
 # مدل‌های Pydantic
@@ -60,25 +122,6 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     model: Optional[str] = "gemma3n-e4b"
     tools: Optional[List[Dict[str, Any]]] = None
-
-
-# Startup event - بارگذاری مدل
-@app.on_event("startup")
-async def startup_event():
-    global pipe
-    logger.info("🚀 در حال بارگذاری مدل Gemma3n-e4b...")
-
-    try:
-        pipe = pipeline(
-            "image-text-to-text",
-            model="~/DataDrive/AI-Model-Archive/gemma-3n-E4B-it$",
-            device="auto",
-            torch_dtype=torch.bfloat16,
-        )
-        logger.info("✅ مدل با موفقیت بارگذاری شد!")
-    except Exception as e:
-        logger.error(f"❌ خطا در بارگذاری مدل: {e}")
-        pipe = None
 
 
 # Middleware برای لاگ درخواست‌ها

@@ -1,0 +1,22 @@
+[Unit]
+Description=Nerd Agent Server - FastAPI with Gemma3n
+After=network.target
+
+[Service]
+Type=simple
+User=ai
+Group=ai
+WorkingDirectory=/home/ai/Desktop/Nerd
+Environment="PATH=/home/ai/Desktop/Nerd/.venv/bin"
+Environment="MODEL_PATH=/home/ai/DataDrive/AI-Model-Archive/gemma-3n-E4B-it"
+Environment="MAX_NEW_TOKENS=2048"
+Environment="TEMPERATURE=0.7"
+Environment="PYTHONWARNINGS=ignore::FutureWarning,ignore::DeprecationWarning"
+ExecStart=/home/ai/Desktop/Nerd/.venv/bin/python /home/ai/Desktop/Nerd/app.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
