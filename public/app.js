@@ -9,7 +9,7 @@ const logger = {
 // ==================== متغیرهای اصلی ====================
 const systemPrompt = [{
     type: 'text',
-    text: 'You are Nerd, a floating web guide. Answer concisely in Persian. Keep replies short and actionable.'
+    text: 'You are Nerd, a floating web ai guide. Answer concisely in Persian. Keep replies short and actionable. type in Markdown format'
 }];
 const history = [{ role: 'system', content: systemPrompt }];
 let lastImage = null;

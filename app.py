@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+
+print("🔄 loading .env")
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response, JSONResponse
@@ -19,11 +24,11 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 import warnings
 
-# سرکوب warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+# Suppress warnings
+# warnings.filterwarnings("ignore", category=FutureWarning)
+# warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# تنظیم لاگ
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s - %(message)s",
@@ -31,28 +36,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ذخیره موقت تصاویر در حافظه
+# Temporary storage for images in memory
 image_store: Dict[str, Dict[str, Any]] = {}
 
-# مدل Gemma3n
+# Gemma3n model
 pipe = None
 
 
-# تابع برای expand کردن مسیر home
+# function for expanding home directory path
 def expand_path(path: str) -> str:
-    """تبدیل ~ به مسیر کامل home directory"""
+    """Convert ~ to full home directory path"""
     return str(Path(path).expanduser().resolve())
 
 
-# لود کردن تنظیمات از environment variables
+# Load settings from environment variables
 MODEL_PATH = os.getenv("MODEL_PATH", "google/gemma-3n-e4b-it")
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "2048"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 
-# اگر مسیر لوکال هست، expand کن
+# If local path, expand it
 if MODEL_PATH.startswith("~") or MODEL_PATH.startswith("/"):
     MODEL_PATH = expand_path(MODEL_PATH)
-    logger.info(f"📂 مسیر مدل لوکال: {MODEL_PATH}")
+    logger.info(f"📂 Local model path: {MODEL_PATH}")
 
 
 # Lifespan context manager (جایگزین on_event)
@@ -60,10 +65,19 @@ if MODEL_PATH.startswith("~") or MODEL_PATH.startswith("/"):
 async def lifespan(app: FastAPI):
     # Startup
     global pipe
-    logger.info("🚀 در حال بارگذاری مدل Gemma3n-e4b...")
+    logger.info("🚀 Loading Gemma3n-e4b model...")
 
     try:
-        # بررسی وجود مسیر لوکال
+        # Check CUDA availability
+        cuda_available = torch.cuda.is_available()
+        device = "cuda" if cuda_available else "cpu"
+        logger.info(f"🔍 CUDA available: {cuda_available}")
+        logger.info(f"📊 Using device: {device}")
+        if cuda_available:
+            logger.info(f"🎮 GPU: {torch.cuda.get_device_name(0)}")
+            logger.info(f"💾 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        
+        # Check if local path exists
         if os.path.exists(MODEL_PATH):
             logger.info(f"✅ مدل از مسیر لوکال بارگذاری می‌شود: {MODEL_PATH}")
         else:
@@ -72,10 +86,10 @@ async def lifespan(app: FastAPI):
         pipe = pipeline(
             "image-text-to-text",
             model=MODEL_PATH,
-            device="auto",
-            torch_dtype=torch.bfloat16,
+            device=device,
+            torch_dtype=torch.float16 if cuda_available else torch.float32,
         )
-        logger.info("✅ مدل با موفقیت بارگذاری شد!")
+        logger.info("✅ model was successfully loaded!")
     except Exception as e:
         logger.error(f"❌ خطا در بارگذاری مدل: {e}")
         logger.error(f"💡 مسیر مورد استفاده: {MODEL_PATH}")
@@ -87,10 +101,10 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("🛑 در حال خاموش شدن سرور...")
+    logger.info("🛑 shutdown server...")
 
 
-# ساخت اپلیکیشن FastAPI با lifespan
+# Make application FastAPI with lifespan
 app = FastAPI(
     title="Nerd Agent Server",
     version="0.1.0",
@@ -98,7 +112,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# تنظیم CORS
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -108,7 +122,7 @@ app.add_middleware(
 )
 
 
-# مدل‌های Pydantic
+# Pydantic models
 class ImageUploadRequest(BaseModel):
     image: str  # base64 string
 
@@ -124,7 +138,7 @@ class ChatRequest(BaseModel):
     tools: Optional[List[Dict[str, Any]]] = None
 
 
-# Middleware برای لاگ درخواست‌ها
+# Middleware for logging requests
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"{request.method} {request.url.path}")
@@ -144,7 +158,7 @@ async def health_check():
     }
 
 
-# آپلود تصویر
+# upload image endpoint
 @app.post("/api/upload-image")
 async def upload_image(request: ImageUploadRequest):
     try:
@@ -174,7 +188,7 @@ async def upload_image(request: ImageUploadRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# تابع پاک‌سازی تصویر بعد از 1 ساعت
+# Image cleanup function after 1 hour
 async def cleanup_image(image_id: str):
     await asyncio.sleep(3600)  # 1 ساعت
     if image_id in image_store:
@@ -182,7 +196,7 @@ async def cleanup_image(image_id: str):
         logger.info(f"[IMAGE] تصویر پاک شد: {image_id}")
 
 
-# سرو تصویر
+# serve image endpoint
 @app.get("/api/images/{image_id}")
 async def get_image(image_id: str):
     if image_id not in image_store:
@@ -204,20 +218,20 @@ async def get_image(image_id: str):
         raise HTTPException(status_code=500, detail="Error decoding image")
 
 
-# تابع helper برای دانلود تصویر از URL
+# Helper function to fetch image from URL
 async def fetch_image_as_base64(url: str) -> Optional[str]:
     try:
-        # اگر URL لوکال ما هست، مستقیم از store بگیر
+        # If the URL is our local one, get directly from store
         if "/api/images/" in url:
             image_id = url.split("/")[-1]
             if image_id in image_store:
                 data = image_store[image_id]["data"]
-                # حذف prefix
+                # Remove prefix
                 if "," in data:
                     return data.split(",")[1]
                 return data
 
-        # در غیر این صورت دانلود کن
+        # Otherwise, download it
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=10.0)
             response.raise_for_status()
@@ -225,13 +239,13 @@ async def fetch_image_as_base64(url: str) -> Optional[str]:
             return base64.b64encode(image_bytes).decode("utf-8")
 
     except Exception as e:
-        logger.error(f"[IMAGE] خطا در دانلود تصویر: {str(e)}")
+        logger.error(f"[IMAGE] Error downloading image: {str(e)}")
         return None
 
 
-# تابع تبدیل base64 به PIL Image
+# Function to convert base64 to PIL Image
 def base64_to_pil(base64_str: str) -> Image.Image:
-    # حذف prefix اگر وجود داره
+    # Remove prefix if exists
     if "," in base64_str:
         base64_str = base64_str.split(",")[1]
 
@@ -244,15 +258,17 @@ def base64_to_pil(base64_str: str) -> Image.Image:
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     start_time = datetime.now()
-    logger.info(f"[CHAT] درخواست چت دریافت شد - تعداد پیام‌ها: {len(request.messages)}")
+    logger.info(
+        f"[CHAT] Chat request received - number of messages: {len(request.messages)}"
+    )
 
     if pipe is None:
         raise HTTPException(
-            status_code=503, detail="مدل هنوز بارگذاری نشده است. لطفا صبر کنید."
+            status_code=503, detail="Model is not loaded yet. Please wait."
         )
 
     try:
-        # تبدیل فرمت پیام‌ها برای Gemma
+        # Convert message format for Gemma
         formatted_messages = []
 
         for msg in request.messages:
@@ -290,24 +306,24 @@ async def chat(request: ChatRequest):
 
             formatted_messages.append(formatted_msg)
 
-        logger.info("[CHAT] ارسال به مدل Gemma3n...")
+        logger.info("[CHAT] Sending to Gemma3n model...")
 
-        # فراخوانی مدل
+        # Call the model
         output = pipe(
             text=formatted_messages,
             max_new_tokens=2048,
             do_sample=True,
-            temperature=0.7,
+            temperature=1.0,
         )
 
         # استخراج پاسخ
         generated_text = output[0]["generated_text"][-1]["content"]
 
         duration = (datetime.now() - start_time).total_seconds()
-        logger.info(f"[CHAT] ✅ پاسخ دریافت شد در {duration:.2f}s")
-        logger.info(f'[CHAT] محتوا: "{generated_text[:100]}..."')
+        logger.info(f"[CHAT] ✅ Response received in {duration:.2f}s")
+        logger.info(f'[CHAT] Content: "{generated_text[:100]}..."')
 
-        # ساخت پاسخ به فرمت مشابه Ollama
+        # Build response in Ollama-like format
         response_data = {
             "message": {"role": "assistant", "content": generated_text},
             "model": request.model,
@@ -319,15 +335,17 @@ async def chat(request: ChatRequest):
         return JSONResponse(content=response_data)
 
     except Exception as e:
-        logger.error(f"[CHAT] ❌ خطا در چت: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"خطا در پردازش: {str(e)}")
+        logger.error(f"[CHAT] ❌ Error in chat: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error processing request: {str(e)}"
+        )
 
 
-# سرو فایل‌های استاتیک
+# Serve static files
 app.mount("/static", StaticFiles(directory="public"), name="static")
 
 
-# صفحه اصلی
+# Main page
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
     try:
@@ -340,14 +358,14 @@ async def serve_index():
         )
 
 
-# اجرای سرور
+# Run the server
 if __name__ == "__main__":
     import uvicorn
 
     print("╔══════════════════════════════════════════════════╗")
-    print("║  🚀 Nerd Agent Server (FastAPI + Gemma3n)      ║")
+    print("║  🚀 Nerd Agent Server (FastAPI + Gemma3n)       ║")
     print("║  📍 http://localhost:8000                       ║")
-    print("║  🤖 Model: google/gemma-3n-e4b-it              ║")
+    print("║  🤖 Model: google/gemma-3n-e4b-it               ║")
     print("╚══════════════════════════════════════════════════╝")
 
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

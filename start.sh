@@ -16,7 +16,7 @@ echo ""
 # چک کردن virtual environment
 if [ ! -d ".venv" ]; then
     echo -e "${YELLOW}📦 ساخت virtual environment...${NC}"
-    python3 -m venv .venv
+    uv venv
 fi
 
 # فعال‌سازی virtual environment
@@ -25,11 +25,10 @@ source .venv/bin/activate
 
 # نصب dependencies
 echo -e "${GREEN}📥 نصب dependencies...${NC}"
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
+uv add -r requirements.txt
 
 # تنظیم متغیرهای محیطی
-export MODEL_PATH="/home/ai/DataDrive/AI-Model-Archive/gemma-3n-E4B-it"
+export MODEL_PATH="/mnt/d/gemma-3n-E4B-it"
 export MAX_NEW_TOKENS="2048"
 export TEMPERATURE="0.7"
 export PYTHONWARNINGS="ignore::FutureWarning,ignore::DeprecationWarning"
@@ -46,4 +45,4 @@ fi
 echo -e "${GREEN}🚀 شروع سرور...${NC}"
 echo ""
 
-python app.py
+uv run app.py

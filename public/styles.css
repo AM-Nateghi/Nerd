@@ -29,7 +29,7 @@
 
 :root {
   --radius: 16px;
-  --font: "Space Grotesk", "Vazirmatn", sans-serif;
+  --font: "Space Grotesk", "Estedad", sans-serif;
 }
 
 * {
@@ -48,11 +48,14 @@ body {
   font-family: var(--font);
   color: var(--text);
   direction: rtl;
-  transition: background 0.3s ease, color 0.3s ease;
+  transition:
+    background 0.3s ease,
+    color 0.3s ease;
 }
 
 [data-theme="dark"] body {
-  background: radial-gradient(
+  background:
+    radial-gradient(
       circle at 10% 20%,
       rgba(118, 228, 195, 0.08),
       transparent 30%
