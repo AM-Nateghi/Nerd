@@ -1,28 +1,21 @@
 from dotenv import load_dotenv
-
-print("🔄 loading .env")
-load_dotenv()
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, Response, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Union
-from transformers import pipeline
-import torch
-import base64
-import io
-from PIL import Image
+from typing import List, Optional, Dict, Any, Union, AsyncIterator
 import httpx
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 import asyncio
 import logging
 import os
-from pathlib import Path
 from contextlib import asynccontextmanager
-import warnings
+import json
+
+print("🔄 loading .env")
+load_dotenv()
 
 # Suppress warnings
 # warnings.filterwarnings("ignore", category=FutureWarning)
@@ -36,72 +29,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Temporary storage for images in memory
-image_store: Dict[str, Dict[str, Any]] = {}
-
-# Gemma3n model
-pipe = None
-
-
-# function for expanding home directory path
-def expand_path(path: str) -> str:
-    """Convert ~ to full home directory path"""
-    return str(Path(path).expanduser().resolve())
-
+# Dictionary to track active generation tasks
+active_tasks: Dict[str, bool] = {}
 
 # Load settings from environment variables
-MODEL_PATH = os.getenv("MODEL_PATH", "google/gemma-3n-e4b-it")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:5836")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemma")
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "2048"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
-
-# If local path, expand it
-if MODEL_PATH.startswith("~") or MODEL_PATH.startswith("/"):
-    MODEL_PATH = expand_path(MODEL_PATH)
-    logger.info(f"📂 Local model path: {MODEL_PATH}")
+SYSTEM_PROMPT = os.getenv(
+    "SYSTEM_PROMPT",
+    "You are Nerd, a floating web ai guide. Answer concisely in Persian. Keep replies short and actionable. type in Markdown format",
+)
+STREAM_HEARTBEAT_SEC = int(os.getenv("STREAM_HEARTBEAT_SEC", "15"))
 
 
 # Lifespan context manager (جایگزین on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    global pipe
-    logger.info("🚀 Loading Gemma3n-e4b model...")
-
-    try:
-        # Check CUDA availability
-        cuda_available = torch.cuda.is_available()
-        device = "cuda" if cuda_available else "cpu"
-        logger.info(f"🔍 CUDA available: {cuda_available}")
-        logger.info(f"📊 Using device: {device}")
-        if cuda_available:
-            logger.info(f"🎮 GPU: {torch.cuda.get_device_name(0)}")
-            logger.info(f"💾 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        
-        # Check if local path exists
-        if os.path.exists(MODEL_PATH):
-            logger.info(f"✅ مدل از مسیر لوکال بارگذاری می‌شود: {MODEL_PATH}")
-        else:
-            logger.info(f"📥 مدل از Hugging Face Hub دانلود می‌شود: {MODEL_PATH}")
-
-        pipe = pipeline(
-            "image-text-to-text",
-            model=MODEL_PATH,
-            device=device,
-            torch_dtype=torch.float16 if cuda_available else torch.float32,
-        )
-        logger.info("✅ model was successfully loaded!")
-    except Exception as e:
-        logger.error(f"❌ خطا در بارگذاری مدل: {e}")
-        logger.error(f"💡 مسیر مورد استفاده: {MODEL_PATH}")
-        logger.error(
-            f"💡 برای استفاده از مسیر لوکال، متغیر محیطی MODEL_PATH را تنظیم کنید"
-        )
-        pipe = None
+    logger.info("🚀 Starting server...")
+    logger.info(f"🔗 Upstream LLM base URL: {LLM_BASE_URL}")
+    logger.info(f"🤖 Upstream model: {LLM_MODEL}")
+    app.state.http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(60.0, read=None)
+    )
 
     yield
 
-    # Shutdown
-    logger.info("🛑 shutdown server...")
+    logger.info("🛑 Shutting down server...")
+    client = getattr(app.state, "http_client", None)
+    if client is not None:
+        await client.aclose()
 
 
 # Make application FastAPI with lifespan
@@ -123,10 +81,6 @@ app.add_middleware(
 
 
 # Pydantic models
-class ImageUploadRequest(BaseModel):
-    image: str  # base64 string
-
-
 class ChatMessage(BaseModel):
     role: str
     content: Union[str, List[Dict[str, Any]]]
@@ -134,8 +88,9 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
-    model: Optional[str] = "gemma3n-e4b"
+    model: Optional[str] = None
     tools: Optional[List[Dict[str, Any]]] = None
+    stream: Optional[bool] = None
 
 
 # Middleware for logging requests
@@ -149,196 +104,223 @@ async def log_requests(request: Request, call_next):
 # Health check
 @app.get("/health")
 async def health_check():
-    model_status = "loaded" if pipe is not None else "not_loaded"
     return {
         "ok": True,
-        "model": "gemma3n-e4b",
-        "model_status": model_status,
+        "upstream_base_url": LLM_BASE_URL,
+        "model": LLM_MODEL,
         "timestamp": datetime.now().isoformat(),
     }
 
 
-# upload image endpoint
-@app.post("/api/upload-image")
-async def upload_image(request: ImageUploadRequest):
-    try:
-        if not request.image:
-            raise HTTPException(status_code=400, detail="No image provided")
-
-        # ساخت ID یونیک
-        image_id = str(uuid.uuid4())
-
-        # ذخیره تصویر با اطلاعات اضافی
-        image_store[image_id] = {
-            "data": request.image,
-            "created_at": datetime.now(),
-            "expires_at": datetime.now() + timedelta(hours=1),
-        }
-
-        # پاک کردن خودکار بعد از 1 ساعت
-        asyncio.create_task(cleanup_image(image_id))
-
-        image_url = f"/api/images/{image_id}"
-        logger.info(f"[IMAGE] تصویر آپلود شد: {image_id}")
-
-        return {"url": image_url, "id": image_id}
-
-    except Exception as e:
-        logger.error(f"[IMAGE] خطا در آپلود: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
-# Image cleanup function after 1 hour
-async def cleanup_image(image_id: str):
-    await asyncio.sleep(3600)  # 1 ساعت
-    if image_id in image_store:
-        del image_store[image_id]
-        logger.info(f"[IMAGE] تصویر پاک شد: {image_id}")
+def extract_text_content(content: Union[str, List[Dict[str, Any]]]) -> str:
+    if isinstance(content, str):
+        return content
+
+    if not isinstance(content, list):
+        return ""
+
+    parts = []
+    for part in content:
+        if part.get("type") == "text":
+            parts.append(part.get("text", ""))
+
+    return " ".join(p for p in parts if p)
 
 
-# serve image endpoint
-@app.get("/api/images/{image_id}")
-async def get_image(image_id: str):
-    if image_id not in image_store:
-        raise HTTPException(status_code=404, detail="Image not found")
-
-    image_data = image_store[image_id]["data"]
-
-    # حذف prefix اگر وجود داره
-    if "," in image_data:
-        image_data = image_data.split(",")[1]
-
-    try:
-        # تبدیل base64 به bytes
-        image_bytes = base64.b64decode(image_data)
-        return Response(content=image_bytes, media_type="image/png")
-
-    except Exception as e:
-        logger.error(f"[IMAGE] خطا در decode: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error decoding image")
-
-
-# Helper function to fetch image from URL
-async def fetch_image_as_base64(url: str) -> Optional[str]:
-    try:
-        # If the URL is our local one, get directly from store
-        if "/api/images/" in url:
-            image_id = url.split("/")[-1]
-            if image_id in image_store:
-                data = image_store[image_id]["data"]
-                # Remove prefix
-                if "," in data:
-                    return data.split(",")[1]
-                return data
-
-        # Otherwise, download it
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10.0)
-            response.raise_for_status()
-            image_bytes = response.content
-            return base64.b64encode(image_bytes).decode("utf-8")
-
-    except Exception as e:
-        logger.error(f"[IMAGE] Error downloading image: {str(e)}")
-        return None
-
-
-# Function to convert base64 to PIL Image
-def base64_to_pil(base64_str: str) -> Image.Image:
-    # Remove prefix if exists
-    if "," in base64_str:
-        base64_str = base64_str.split(",")[1]
-
-    image_bytes = base64.b64decode(base64_str)
-    image = Image.open(io.BytesIO(image_bytes))
-    return image
-
-
-# Chat API
+# Chat API with OpenAI-compatible upstream streaming
 @app.post("/api/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, raw_request: Request):
     start_time = datetime.now()
+    task_id = str(uuid.uuid4())
+    active_tasks[task_id] = True
+
     logger.info(
-        f"[CHAT] Chat request received - number of messages: {len(request.messages)}"
+        f"[CHAT-{task_id}] Request received - messages: {len(request.messages)}"
     )
 
-    if pipe is None:
-        raise HTTPException(
-            status_code=503, detail="Model is not loaded yet. Please wait."
-        )
-
     try:
-        # Convert message format for Gemma
-        formatted_messages = []
+        prompt_start = datetime.now()
+        upstream_messages: List[Dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_PROMPT}
+        ]
 
+        non_text_count = 0
         for msg in request.messages:
-            formatted_msg = {"role": msg.role, "content": []}
+            if msg.role == "system":
+                continue
+            if msg.role not in ("user", "assistant"):
+                continue
 
-            if isinstance(msg.content, str):
-                # فرمت قدیمی - فقط متن
-                formatted_msg["content"].append({"type": "text", "text": msg.content})
+            text = extract_text_content(msg.content).strip()
+            if not text:
+                if isinstance(msg.content, list):
+                    non_text_count += 1
+                continue
 
-            elif isinstance(msg.content, list):
-                # فرمت جدید - استخراج متن و تصاویر
-                for part in msg.content:
-                    if part.get("type") == "text":
-                        formatted_msg["content"].append(
-                            {"type": "text", "text": part.get("text", "")}
-                        )
+            upstream_messages.append({"role": msg.role, "content": text})
 
-                    elif part.get("type") == "image":
-                        image_url = part.get("url", "")
-                        logger.info(f"[CHAT] دانلود تصویر از: {image_url}")
+        if non_text_count > 0:
+            logger.warning(
+                f"[CHAT-{task_id}] Ignored {non_text_count} non-text message part(s)"
+            )
 
-                        # دانلود و تبدیل تصویر
-                        base64_image = await fetch_image_as_base64(image_url)
+        if len(upstream_messages) == 1:
+            raise HTTPException(status_code=400, detail="No user content provided")
 
-                        if base64_image:
-                            # تبدیل به PIL Image
-                            try:
-                                pil_image = base64_to_pil(base64_image)
-                                formatted_msg["content"].append(
-                                    {"type": "image", "image": pil_image}
-                                )
-                                logger.info("[CHAT] تصویر با موفقیت پردازش شد")
-                            except Exception as e:
-                                logger.error(f"[CHAT] خطا در پردازش تصویر: {e}")
+        prompt_duration = (datetime.now() - prompt_start).total_seconds()
+        logger.info(f"[CHAT-{task_id}] Prompt built in {prompt_duration:.2f}s")
 
-            formatted_messages.append(formatted_msg)
+        logger.info(f"[CHAT-{task_id}] Generation started (upstream streaming)")
 
-        logger.info("[CHAT] Sending to Gemma3n model...")
-
-        # Call the model
-        output = pipe(
-            text=formatted_messages,
-            max_new_tokens=2048,
-            do_sample=True,
-            temperature=1.0,
-        )
-
-        # استخراج پاسخ
-        generated_text = output[0]["generated_text"][-1]["content"]
-
-        duration = (datetime.now() - start_time).total_seconds()
-        logger.info(f"[CHAT] ✅ Response received in {duration:.2f}s")
-        logger.info(f'[CHAT] Content: "{generated_text[:100]}..."')
-
-        # Build response in Ollama-like format
-        response_data = {
-            "message": {"role": "assistant", "content": generated_text},
-            "model": request.model,
-            "created_at": datetime.now().isoformat(),
-            "done": True,
-            "duration_seconds": duration,
+        payload = {
+            "model": request.model or LLM_MODEL,
+            "messages": upstream_messages,
+            "stream": True,
+            "temperature": TEMPERATURE,
+            "top_p": 0.75,
+            "top_k": 20,
+            "max_tokens": MAX_NEW_TOKENS,
         }
 
-        return JSONResponse(content=response_data)
+        async def generate_stream() -> AsyncIterator[str]:
+            try:
+                full_response = ""
+                step_start = datetime.now()
+                first_token_time = None
+
+                async def progress_logger() -> None:
+                    while active_tasks.get(task_id, False):
+                        await asyncio.sleep(STREAM_HEARTBEAT_SEC)
+                        if not active_tasks.get(task_id, False):
+                            break
+                        elapsed = (datetime.now() - step_start).total_seconds()
+                        logger.info(
+                            f"[CHAT-{task_id}] Still streaming... {elapsed:.1f}s elapsed"
+                        )
+
+                progress_task = asyncio.create_task(progress_logger())
+
+                client: httpx.AsyncClient = raw_request.app.state.http_client
+                url = f"{LLM_BASE_URL}/v1/chat/completions"
+
+                async with client.stream("POST", url, json=payload) as resp:
+                    if resp.status_code != 200:
+                        error_text = (await resp.aread()).decode("utf-8", errors="ignore")
+                        raise RuntimeError(
+                            f"Upstream error {resp.status_code}: {error_text}"
+                        )
+
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+
+                        if not line.startswith("data:"):
+                            continue
+
+                        if not active_tasks.get(task_id, False):
+                            logger.info(f"[CHAT-{task_id}] ⚠️ Task cancelled by client")
+                            break
+
+                        if await raw_request.is_disconnected():
+                            logger.info(f"[CHAT-{task_id}] ⚠️ Client disconnected")
+                            active_tasks[task_id] = False
+                            break
+
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+
+                        try:
+                            payload_chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+
+                        choices = payload_chunk.get("choices", [])
+                        if not choices:
+                            continue
+
+                        delta = choices[0].get("delta", {})
+                        content = delta.get("content")
+                        if not content:
+                            continue
+
+                        if first_token_time is None:
+                            first_token_time = (datetime.now() - start_time).total_seconds()
+                            logger.info(
+                                f"[CHAT-{task_id}] First token in {first_token_time:.2f}s"
+                            )
+
+                        full_response += content
+                        chunk_data = {
+                            "message": {
+                                "role": "assistant",
+                                "content": content
+                            },
+                            "done": False
+                        }
+
+                        yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                duration = (datetime.now() - start_time).total_seconds()
+                logger.info(f"[CHAT-{task_id}] ✅ Response completed in {duration:.2f}s")
+                logger.info(f'[CHAT-{task_id}] Response preview: "{full_response[:100]}..."')
+
+                final_data = {
+                    "message": {
+                        "role": "assistant",
+                        "content": ""
+                    },
+                    "done": True,
+                    "model": request.model or LLM_MODEL,
+                    "created_at": datetime.now().isoformat(),
+                    "duration_seconds": duration,
+                }
+
+                yield f"data: {json.dumps(final_data)}\n\n"
+
+            except Exception as e:
+                logger.error(f"[CHAT-{task_id}] ❌ Streaming error: {str(e)}")
+                error_data = {
+                    "error": str(e),
+                    "done": True
+                }
+                yield f"data: {json.dumps(error_data)}\n\n"
+            finally:
+                if "progress_task" in locals():
+                    progress_task.cancel()
+                if task_id in active_tasks:
+                    del active_tasks[task_id]
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
 
     except Exception as e:
-        logger.error(f"[CHAT] ❌ Error in chat: {str(e)}")
+        logger.error(f"[CHAT-{task_id}] ❌ Chat error: {str(e)}")
+        if task_id in active_tasks:
+            del active_tasks[task_id]
         raise HTTPException(
             status_code=500, detail=f"Error processing request: {str(e)}"
         )
+
+
+# Cancel a chat task
+@app.post("/api/chat/cancel/{task_id}")
+async def cancel_chat(task_id: str):
+    if task_id in active_tasks:
+        active_tasks[task_id] = False
+        logger.info(f"[CHAT-{task_id}] 🛑 Cancellation requested")
+        return {"status": "cancelled", "task_id": task_id}
+    else:
+        return {"status": "not_found", "task_id": task_id}
 
 
 # Serve static files
@@ -365,7 +347,6 @@ if __name__ == "__main__":
     print("╔══════════════════════════════════════════════════╗")
     print("║  🚀 Nerd Agent Server (FastAPI + Gemma3n)       ║")
     print("║  📍 http://localhost:8000                       ║")
-    print("║  🤖 Model: google/gemma-3n-e4b-it               ║")
     print("╚══════════════════════════════════════════════════╝")
 
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=False, log_level="info")

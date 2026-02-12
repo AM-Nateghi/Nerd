@@ -4,12 +4,12 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#f5f1ea" />
     <title>Nerd Agent</title>
     <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&family=Fraunces:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.0/marked.min.js"></script>
@@ -17,30 +17,14 @@
 </head>
 
 <body>
-    <button id="nerd-launcher" aria-label="باز کردن Nerd" hidden>
-        <i data-feather="message-circle"></i>
-        <span>Nerd</span>
-    </button>
-
     <section id="nerd-widget" aria-live="polite">
         <header class="nerd-head">
             <div class="nerd-head-title">
                 <img src="/icon.svg" alt="Nerd" width="32" height="32" />
                 <div>
-                    <p class="nerd-kicker">مرورگر × سیستم</p>
+                    <p class="nerd-kicker">Nerd Studio</p>
                     <h1>Nerd</h1>
                 </div>
-            </div>
-            <div class="nerd-head-actions">
-                <button id="nerd-theme" title="تغییر تم" aria-label="تم">
-                    <i data-feather="sun"></i>
-                </button>
-                <button id="nerd-pin" title="پین روی صفحه" aria-label="پین">
-                    <i data-feather="cast"></i>
-                </button>
-                <button id="nerd-close" aria-label="بستن">
-                    <i data-feather="x"></i>
-                </button>
             </div>
         </header>
 
@@ -62,20 +46,10 @@
 
         <footer class="nerd-input">
             <div class="nerd-input-row">
-                <input type="file" id="nerd-image-input" accept="image/*" hidden />
-                <input type="file" id="nerd-audio-input" accept="audio/*" hidden />
-                <div class="nerd-attachments">
-                    <button id="nerd-image" title="انتخاب تصویر" aria-label="تصویر">
-                        <i data-feather="image"></i>
-                    </button>
-                    <button id="nerd-voice" title="ضبط صدا" aria-label="صدا">
-                        <i data-feather="mic"></i>
-                    </button>
-                    <button id="nerd-upload-audio" title="آپلود صدا" aria-label="آپلود صدا">
-                        <i data-feather="upload"></i>
-                    </button>
-                </div>
                 <textarea id="nerd-text" placeholder="هر چیزی بپرس..." rows="1"></textarea>
+                <button id="nerd-cancel" class="danger" aria-label="لغو" hidden>
+                    <i data-feather="x-circle"></i>
+                </button>
                 <button id="nerd-send" class="primary" aria-label="ارسال">
                     <i data-feather="send"></i>
                 </button>
