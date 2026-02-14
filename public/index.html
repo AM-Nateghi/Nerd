@@ -1,69 +1,140 @@
 <!doctype html>
-<html lang="fa" data-theme="dark">
+<html lang="fa">
 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f5f1ea" />
-    <title>Nerd Agent</title>
+    <meta name="theme-color" content="#1a1a1f" />
+    <title>Nerd</title>
     <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&family=Fraunces:wght@600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.0/marked.min.js"></script>
-    <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
 <body>
-    <section id="nerd-widget" aria-live="polite">
-        <header class="nerd-head">
-            <div class="nerd-head-title">
-                <img src="/icon.svg" alt="Nerd" width="32" height="32" />
-                <div>
-                    <p class="nerd-kicker">Nerd Studio</p>
-                    <h1>Nerd</h1>
-                </div>
+    <!-- Username Modal -->
+    <div id="username-modal" class="modal-overlay" hidden>
+        <div class="modal-box">
+            <div class="modal-logo">
+                <img src="/static/icon.svg" alt="Nerd" width="40" height="40" />
+            </div>
+            <h2 class="modal-title">خوش آمدی!</h2>
+            <p class="modal-desc">لطفاً یک نام کاربری انتخاب کن</p>
+            <input id="username-input" type="text" placeholder="نام کاربری..." maxlength="24" autocomplete="off" />
+            <button id="username-submit" class="modal-btn">ورود</button>
+        </div>
+    </div>
+
+    <main id="app">
+        <!-- Top bar -->
+        <header id="top-bar">
+            <div class="top-bar-right">
+                <img src="/static/icon.svg" alt="Nerd" width="24" height="24" class="top-bar-logo" />
+                <span class="top-bar-name">Nerd</span>
+            </div>
+            <div class="top-bar-left">
+                <span id="username-display" class="top-bar-user"></span>
+                <button id="btn-theme" class="btn-icon-sm" aria-label="تغییر تم">
+                    <svg id="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5" />
+                        <line x1="12" y1="1" x2="12" y2="3" />
+                        <line x1="12" y1="21" x2="12" y2="23" />
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                        <line x1="1" y1="12" x2="3" y2="12" />
+                        <line x1="21" y1="12" x2="23" y2="12" />
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                    </svg>
+                    <svg id="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                </button>
             </div>
         </header>
 
-        <div id="nerd-messages" role="log" aria-live="polite">
-            <div class="empty-state">
-                <i data-feather="message-square"></i>
-                <p>سلام! چطور می‌تونم کمکت کنم؟</p>
+        <!-- Chat Messages Area -->
+        <div id="chat-container">
+            <div id="chat-messages" role="log" aria-live="polite">
+                <div class="welcome-screen" id="welcome-screen">
+                    <div class="welcome-logo">
+                        <img src="/static/icon.svg" alt="Nerd" width="48" height="48" />
+                    </div>
+                    <h1 class="welcome-title">چطور می‌تونم کمکت کنم؟</h1>
+                    <div class="welcome-chips">
+                        <button class="chip" data-prompt="یک متن خلاقانه بنویس">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                            </svg>
+                            یک متن خلاقانه بنویس
+                        </button>
+                        <button class="chip" data-prompt="کد پایتون بنویس">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="16 18 22 12 16 6" />
+                                <polyline points="8 6 2 12 8 18" />
+                            </svg>
+                            کد پایتون بنویس
+                        </button>
+                        <button class="chip" data-prompt="درباره هوش مصنوعی توضیح بده">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="16" x2="12" y2="12" />
+                                <line x1="12" y1="8" x2="12.01" y2="8" />
+                            </svg>
+                            درباره هوش مصنوعی توضیح بده
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div id="nerd-loading" class="loading" hidden>
-            <div class="loading-dots">
-                <span></span>
-                <span></span>
-                <span></span>
+        <!-- Input Area -->
+        <div id="input-area">
+            <div class="input-wrapper">
+                <div class="input-box">
+                    <textarea id="message-input" placeholder="پیامت رو بنویس..." rows="1"></textarea>
+                    <div class="input-actions">
+                        <button id="btn-cancel" class="btn-icon btn-cancel" aria-label="لغو" hidden>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            </svg>
+                        </button>
+                        <button id="btn-send" class="btn-icon btn-send" aria-label="ارسال">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="22" y1="2" x2="11" y2="13" />
+                                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="input-footer">
+                    <span id="status-text"></span>
+                    <button id="btn-clear" class="btn-text" aria-label="گفتگوی جدید">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        گفتگوی جدید
+                    </button>
+                </div>
             </div>
-            <p>در حال تولید پاسخ...</p>
         </div>
-
-        <footer class="nerd-input">
-            <div class="nerd-input-row">
-                <textarea id="nerd-text" placeholder="هر چیزی بپرس..." rows="1"></textarea>
-                <button id="nerd-cancel" class="danger" aria-label="لغو" hidden>
-                    <i data-feather="x-circle"></i>
-                </button>
-                <button id="nerd-send" class="primary" aria-label="ارسال">
-                    <i data-feather="send"></i>
-                </button>
-            </div>
-            <div class="nerd-actions">
-                <span id="nerd-status"></span>
-                <button id="nerd-clear" title="پاک کردن" aria-label="پاک کردن">
-                    <i data-feather="trash-2"></i>
-                    <span>پاک کردن</span>
-                </button>
-            </div>
-        </footer>
-    </section>
-
+    </main>
     <script src="/static/app.js"></script>
 </body>
 

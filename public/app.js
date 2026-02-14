@@ -1,250 +1,457 @@
-// ==================== لاگ سیستم ====================
+// ==================== Logger ====================
 const logger = {
     info: (msg, ...args) => console.log(`[INFO] ${msg}`, ...args),
     warn: (msg, ...args) => console.warn(`[WARN] ${msg}`, ...args),
     error: (msg, ...args) => console.error(`[ERROR] ${msg}`, ...args),
-    debug: (msg, ...args) => console.log(`[DEBUG] ${msg}`, ...args)
 };
 
-// ==================== متغیرهای اصلی ====================
+// ==================== Cookie Helpers ====================
+function setCookie(name, value, days = 365) {
+    const d = new Date();
+    d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+    document.cookie = `${name}=${encodeURIComponent(value)};expires=${d.toUTCString()};path=/;SameSite=Lax`;
+}
+
+function getCookie(name) {
+    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? decodeURIComponent(match[2]) : null;
+}
+
+// ==================== Theme ====================
+function getTheme() {
+    return localStorage.getItem('nerd_theme') || 'dark';
+}
+
+function applyTheme(theme) {
+    if (theme === 'light') {
+        document.body.setAttribute('data-theme', 'light');
+        $('#icon-sun').hide();
+        $('#icon-moon').show();
+    } else {
+        document.body.removeAttribute('data-theme');
+        $('#icon-sun').show();
+        $('#icon-moon').hide();
+    }
+    localStorage.setItem('nerd_theme', theme);
+}
+
+function toggleTheme() {
+    const current = getTheme();
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+// ==================== State ====================
 const history = [];
 let currentTaskId = null;
+let sessionId = localStorage.getItem('nerd_session_id') || null;
+let userId = getCookie('nerd_user_id') || null;
+let username = getCookie('nerd_username') || null;
+let pipelineState = { active: false, status: '', detail: '' };
 
+function statusText(status, detail = '') {
+    if (status === 'thinking') return 'در حال فکر کردن';
+    if (status === 'searching') return `جستجو${detail ? ` "${detail}"` : ''}`;
+    if (status === 'search_results_received') return 'دریافت نتایج جستجو';
+    if (status === 'tool') return 'اجرای ابزار';
+    if (status === 'tool_result_received') return 'دریافت نتیجه ابزار';
+    return 'در حال فکر کردن';
+}
+
+// ==================== Username Registration ====================
+async function registerUser(name) {
+    try {
+        const res = await fetch('/api/user/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: name }),
+        });
+        if (!res.ok) throw new Error('Registration failed');
+        const data = await res.json();
+        userId = data.user_id;
+        username = data.username;
+        setCookie('nerd_user_id', userId);
+        setCookie('nerd_username', username);
+        logger.info('User registered:', username, userId);
+
+        // Link current session if exists
+        if (sessionId) {
+            linkSession(userId, sessionId);
+        }
+
+        return data;
+    } catch (err) {
+        logger.error('Registration error:', err.message);
+        throw err;
+    }
+}
+
+async function linkSession(uid, sid) {
+    try {
+        await fetch('/api/sessions/link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: uid, session_id: sid }),
+        });
+    } catch (e) {
+        logger.warn('Failed to link session:', e.message);
+    }
+}
+
+async function loadChatHistory() {
+    if (!sessionId) return;
+    try {
+        const res = await fetch(`/api/history/${sessionId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+            history.splice(0);
+            data.messages.forEach(m => {
+                history.push({ role: m.role, content: m.content });
+            });
+            logger.info(`Loaded ${data.messages.length} messages from history`);
+        }
+    } catch (err) {
+        logger.warn('Failed to load history:', err.message);
+    }
+}
+
+function showUsernameModal() {
+    $('#username-modal').removeAttr('hidden').show();
+    $('#username-input').focus();
+}
+
+function hideUsernameModal() {
+    $('#username-modal').attr('hidden', true).hide();
+}
+
+function updateUsernameDisplay() {
+    if (username) {
+        $('#username-display').text(username);
+    } else {
+        $('#username-display').text('');
+    }
+}
+
+// ==================== Helpers ====================
 function isNearBottom($el, threshold = 120) {
     const el = $el[0];
     return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
 }
 
-function scrollToBottomIfNear($el, shouldStick) {
-    if (shouldStick) {
+function scrollToBottom($el, force) {
+    if (force) {
         $el[0].scrollTop = $el[0].scrollHeight;
     }
 }
 
-// ==================== تابع رندر پیام‌ها ====================
-function renderMessages() {
-    logger.debug('رندر کردن پیام‌ها...');
-    const $messages = $('#nerd-messages');
-    const shouldStick = isNearBottom($messages);
+function createMsgRow(role, content) {
+    const $row = $('<div>').addClass(`msg-row ${role}`);
+    const $inner = $('<div>').addClass('msg-inner');
 
+    // Label
+    const labelText = role === 'user' ? (username || 'شما') : 'Nerd';
+    const $label = $('<div>').addClass('msg-label').text(labelText);
+    $inner.append($label);
+
+    // Body
+    const $body = $('<div>').addClass('msg-body');
+    if (role === 'assistant' && typeof marked !== 'undefined') {
+        $body.html(marked.parse(content || ''));
+    } else {
+        $body.text(content || '');
+    }
+    $inner.append($body);
+
+    $row.append($inner);
+    return $row;
+}
+
+// ==================== Render ====================
+function renderMessages() {
+    const $messages = $('#chat-messages');
+    const shouldStick = isNearBottom($messages);
     const userMessages = history.filter(m => m.role !== 'system');
 
     if (userMessages.length === 0) {
         $messages.html(`
-            <div class="empty-state">
-                <i data-feather="message-square"></i>
-                <p>سلام! چطور می‌تونم کمکت کنم؟</p>
+            <div class="welcome-screen" id="welcome-screen">
+                <div class="welcome-logo">
+                    <img src="/static/icon.svg" alt="Nerd" width="48" height="48" />
+                </div>
+                <h1 class="welcome-title">چطور می‌تونم کمکت کنم؟</h1>
+                <div class="welcome-chips">
+                    <button class="chip" data-prompt="یک متن خلاقانه بنویس">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        یک متن خلاقانه بنویس
+                    </button>
+                    <button class="chip" data-prompt="کد پایتون بنویس">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        کد پایتون بنویس
+                    </button>
+                    <button class="chip" data-prompt="درباره هوش مصنوعی توضیح بده">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        درباره هوش مصنوعی توضیح بده
+                    </button>
+                </div>
             </div>
         `);
+        bindChipEvents();
     } else {
         $messages.empty();
-
         userMessages.forEach((msg, index) => {
-            const $item = $('<div>')
-            .addClass(`message ${msg.role}`)
-            .attr('data-index', index);
-
-            // پردازش محتوا
+            let content = '';
             if (typeof msg.content === 'string') {
-                const textContent = msg.content;
-                if (msg.role === 'assistant' && typeof marked !== 'undefined') {
-                    $item.html(marked.parse(textContent));
-                } else {
-                    $item.text(textContent);
-                }
+                content = msg.content;
             } else if (Array.isArray(msg.content)) {
-                const textContent = msg.content
+                content = msg.content
                     .filter(part => part.type === 'text')
                     .map(part => part.text || '')
                     .join('');
-                if (msg.role === 'assistant' && typeof marked !== 'undefined') {
-                    $item.html(marked.parse(textContent));
-                } else {
-                    $item.text(textContent);
-                }
             }
-
-            $messages.append($item);
+            const $row = createMsgRow(msg.role, content);
+            $row.attr('data-index', index);
+            $messages.append($row);
         });
     }
 
-    feather.replace();
-    scrollToBottomIfNear($messages, shouldStick);
+    renderPipeline($messages);
+    scrollToBottom($messages, shouldStick);
+}
+
+function renderPipeline($messages) {
+    $messages.find('.msg-row.pipeline').remove();
+    if (!pipelineState.active) return;
+
+    const label = statusText(pipelineState.status, pipelineState.detail);
+    const $row = $('<div>').addClass('msg-row assistant pipeline');
+    const $inner = $('<div>').addClass('msg-inner');
+    $inner.html(`
+        <div class="pipeline-status">
+            <div class="pipeline-dots"><span></span><span></span><span></span></div>
+            <span>${label}</span>
+        </div>
+    `);
+    $row.append($inner);
+    $messages.append($row);
 }
 
 function updateMessageContent(index, content) {
-    const $messages = $('#nerd-messages');
+    const $messages = $('#chat-messages');
     const shouldStick = isNearBottom($messages);
-    const $item = $messages.find(`[data-index="${index}"]`);
-    if ($item.length === 0) {
+    const $row = $messages.find(`[data-index="${index}"]`);
+    if ($row.length === 0) {
         renderMessages();
         return;
     }
 
+    const $body = $row.find('.msg-body');
     if (typeof marked !== 'undefined') {
-        $item.html(marked.parse(content));
+        $body.html(marked.parse(content));
     } else {
-        $item.text(content);
+        $body.text(content);
     }
 
-    scrollToBottomIfNear($messages, shouldStick);
+    scrollToBottom($messages, shouldStick);
 }
 
-// ==================== تنظیم وضعیت ====================
+// ==================== Status & Loading ====================
 function setStatus(text) {
-    logger.debug('وضعیت:', text || 'خالی');
-    $('#nerd-status').text(text || '');
+    $('#status-text').text(text || '');
 }
 
-// ==================== نمایش/مخفی لودینگ ====================
 function showLoading(show) {
-    $('#nerd-loading').toggle(show);
-    $('#nerd-send').prop('disabled', show);
-    $('#nerd-cancel').toggle(show);
+    $('#btn-send').prop('disabled', show);
+    if (show) {
+        $('#btn-cancel').removeAttr('hidden').show();
+    } else {
+        $('#btn-cancel').attr('hidden', true).hide();
+    }
 }
 
-// ==================== لغو درخواست ====================
+// ==================== Cancel ====================
 async function cancelRequest() {
-    if (!currentTaskId) {
-        logger.warn('هیچ درخواست فعالی برای لغو وجود ندارد');
-        return;
-    }
-
-    logger.info('لغو درخواست:', currentTaskId);
-
+    if (!currentTaskId) return;
     try {
-        await fetch(`/api/chat/cancel/${currentTaskId}`, {
-            method: 'POST'
-        });
-
+        await fetch(`/api/chat/cancel/${currentTaskId}`, { method: 'POST' });
         setStatus('درخواست لغو شد');
         showLoading(false);
         currentTaskId = null;
     } catch (err) {
-        logger.error('خطا در لغو درخواست:', err.message);
+        logger.error('Cancel error:', err.message);
     }
 }
 
-// ==================== ارسال پیام ====================
-async function sendMessage() {
-    const content = $('#nerd-text').val().trim();
-    if (!content) {
-        logger.warn('پیام خالی است');
-        return;
-    }
+// ==================== Send Message ====================
+async function sendMessage(content) {
+    if (!content) content = $('#message-input').val().trim();
+    if (!content) return;
 
-    logger.info('ارسال پیام:', content);
-
-    const userMessage = {
-        role: 'user',
-        content: content
-    };
-
-    history.push(userMessage);
-    $('#nerd-text').val('');
+    history.push({ role: 'user', content });
+    $('#message-input').val('').css('height', 'auto');
     renderMessages();
 
     setStatus('در حال تولید پاسخ...');
     showLoading(true);
+    pipelineState = { active: true, status: 'thinking', detail: '' };
 
-    // Create a placeholder for the assistant response
-    const assistantMessage = {
-        role: 'assistant',
-        content: ''
-    };
+    const assistantMessage = { role: 'assistant', content: '' };
     history.push(assistantMessage);
     const assistantIndex = history.filter(m => m.role !== 'system').length - 1;
     renderMessages();
 
     try {
-        logger.debug('ارسال درخواست به سرور...');
         const response = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: history.slice(0, -1) }), // Don't send the empty assistant message
+            headers: {
+                'Content-Type': 'application/json',
+                ...(sessionId ? { 'X-Session-Id': sessionId } : {}),
+            },
+            body: JSON.stringify({
+                messages: history.slice(0, -1),
+                session_id: sessionId,
+            }),
         });
 
-        if (!response.ok) {
-            throw new Error(`خطای سرور: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`خطای سرور: ${response.status}`);
 
-        // Read the stream
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
         while (true) {
             const { done, value } = await reader.read();
-
-            if (done) {
-                logger.info('Stream completed');
-                break;
-            }
+            if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
-
-            // Process complete messages from buffer
             const lines = buffer.split('\n');
-            buffer = lines.pop(); // Keep incomplete line in buffer
+            buffer = lines.pop();
 
             for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = JSON.parse(line.slice(6));
+                if (!line.startsWith('data: ')) continue;
+                const data = JSON.parse(line.slice(6));
 
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
+                if (data.error) throw new Error(data.error);
 
-                    if (!data.done && data.message && data.message.content) {
-                        // Append new content
-                        assistantMessage.content += data.message.content;
-                        updateMessageContent(assistantIndex, assistantMessage.content);
-                    }
+                if (data.type === 'status' && !data.done) {
+                    pipelineState = {
+                        active: true,
+                        status: data.status || 'thinking',
+                        detail: data.detail || '',
+                    };
+                    const $messages = $('#chat-messages');
+                    renderPipeline($messages);
+                    setStatus(statusText(pipelineState.status, pipelineState.detail));
+                    continue;
+                }
 
-                    if (data.done) {
-                        logger.info('پاسخ کامل شد');
-                        setStatus('');
-                        break;
+                if (data.session_id) {
+                    sessionId = data.session_id;
+                    localStorage.setItem('nerd_session_id', sessionId);
+                    // Link session to user
+                    if (userId) {
+                        linkSession(userId, sessionId);
                     }
+                }
+
+                if (data.task_id) currentTaskId = data.task_id;
+
+                if (!data.done && data.message && data.message.content) {
+                    pipelineState.active = false;
+                    $('#chat-messages').find('.msg-row.pipeline').remove();
+                    assistantMessage.content += data.message.content;
+                    updateMessageContent(assistantIndex, assistantMessage.content);
+                }
+
+                if (data.done) {
+                    pipelineState.active = false;
+                    setStatus('');
+                    if (data.task_id) currentTaskId = data.task_id;
+                    break;
                 }
             }
         }
-
     } catch (err) {
-        logger.error('خطا در ارسال پیام:', err.message);
-
-        // Remove the empty assistant message and add error
+        logger.error('Send error:', err.message);
+        pipelineState.active = false;
         history.pop();
         history.push({
             role: 'assistant',
-            content: `❌ مشکلی پیش آمد: ${err.message}\n\n🔍 مطمئن شو سرور در حال اجراست.`
+            content: `مشکلی پیش آمد: ${err.message}\n\nمطمئن شو سرور در حال اجراست.`,
         });
         renderMessages();
     } finally {
+        pipelineState.active = false;
         showLoading(false);
         currentTaskId = null;
-        $('#nerd-text').focus();
+        $('#message-input').focus();
     }
 }
 
+// ==================== Chip events ====================
+function bindChipEvents() {
+    $(document).off('click', '.chip').on('click', '.chip', function () {
+        const prompt = $(this).data('prompt');
+        if (prompt) sendMessage(prompt);
+    });
+}
 
-// ==================== راه‌اندازی اولیه ====================
-$(document).ready(function () {
-    logger.info('='.repeat(50));
-    logger.info('شروع Nerd Agent');
-    logger.info('='.repeat(50));
+// ==================== Init ====================
+$(document).ready(async function () {
+    logger.info('Nerd starting...');
 
-    // رویدادها
-    $('#nerd-send').on('click', sendMessage);
-    $('#nerd-cancel').on('click', cancelRequest);
+    // Apply saved theme
+    applyTheme(getTheme());
 
-    $('#nerd-clear').on('click', () => {
-        logger.info('پاک کردن تاریخچه');
-        history.splice(0);
+    // Theme toggle
+    $('#btn-theme').on('click', toggleTheme);
+
+    // Check if user exists
+    if (!userId || !username) {
+        showUsernameModal();
+    } else {
+        updateUsernameDisplay();
+        // Load chat history from DB
+        await loadChatHistory();
         renderMessages();
+    }
+
+    // Username modal submit
+    $('#username-submit').on('click', async () => {
+        const name = $('#username-input').val().trim();
+        if (name.length < 2) return;
+        try {
+            await registerUser(name);
+            hideUsernameModal();
+            updateUsernameDisplay();
+            // Load existing chat history if session exists
+            await loadChatHistory();
+            renderMessages();
+        } catch (e) {
+            logger.error('Registration failed');
+        }
     });
 
-    $('#nerd-text').on('keydown', (e) => {
+    $('#username-input').on('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            $('#username-submit').click();
+        }
+    });
+
+    // Chat events
+    $('#btn-send').on('click', () => sendMessage());
+    $('#btn-cancel').on('click', cancelRequest);
+
+    $('#btn-clear').on('click', () => {
+        // Create new session
+        sessionId = null;
+        localStorage.removeItem('nerd_session_id');
+        history.splice(0);
+        renderMessages();
+        setStatus('');
+    });
+
+    $('#message-input').on('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendMessage();
@@ -252,16 +459,20 @@ $(document).ready(function () {
     });
 
     // Auto-resize textarea
-    $('#nerd-text').on('input', function () {
+    $('#message-input').on('input', function () {
         this.style.height = 'auto';
-        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        this.style.height = Math.min(this.scrollHeight, 160) + 'px';
     });
 
-    // راه‌اندازی اولیه
-    renderMessages();
+    // Chip events
+    bindChipEvents();
 
-    // Replace feather icons
-    feather.replace();
+    // Initial render (if user already registered)
+    if (userId && username) {
+        // already rendered above
+    } else {
+        renderMessages();
+    }
 
-    logger.info('Nerd Agent آماده است ✓');
+    logger.info('Nerd ready');
 });
