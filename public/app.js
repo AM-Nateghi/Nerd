@@ -47,6 +47,8 @@ let sessionId = localStorage.getItem('nerd_session_id') || null;
 let userId = getCookie('nerd_user_id') || null;
 let username = getCookie('nerd_username') || null;
 let pipelineState = { active: false, status: '', detail: '' };
+let currentSessions = JSON.parse(localStorage.getItem('nerd_sessions_cache') || '[]');
+let pendingRenameSessionId = null;
 
 function statusText(status, detail = '') {
     if (status === 'thinking') return 'در حال فکر کردن';
@@ -85,15 +87,189 @@ async function registerUser(name) {
     }
 }
 
-async function linkSession(uid, sid) {
+async function linkSession(uid, sid, title) {
     try {
+        const body = { user_id: uid, session_id: sid };
+        if (title) body.title = title;
         await fetch('/api/sessions/link', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: uid, session_id: sid }),
+            body: JSON.stringify(body),
         });
+        // refresh sidebar cache in background
+        if ($('#sidebar').hasClass('open')) loadUserSessions();
     } catch (e) {
         logger.warn('Failed to link session:', e.message);
+    }
+}
+
+// ==================== Sidebar ====================
+function openSidebar() {
+    $('#sidebar').addClass('open');
+    $('#sidebar-overlay').addClass('active');
+    loadUserSessions();
+}
+
+function closeSidebar() {
+    $('#sidebar').removeClass('open');
+    $('#sidebar-overlay').removeClass('active');
+}
+
+async function loadUserSessions() {
+    if (!userId) return;
+    try {
+        const res = await fetch(`/api/sessions/${userId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        currentSessions = data.sessions || [];
+        localStorage.setItem('nerd_sessions_cache', JSON.stringify(currentSessions));
+        renderSessionList(currentSessions);
+    } catch (err) {
+        logger.warn('Failed to load sessions:', err.message);
+        // fall back to cache
+        renderSessionList(currentSessions);
+    }
+}
+
+function formatRelativeDate(isoString) {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    const now = new Date();
+    const diff = now - d;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'الان';
+    if (mins < 60) return `${mins} دقیقه پیش`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} ساعت پیش`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} روز پیش`;
+    return d.toLocaleDateString('fa-IR');
+}
+
+function renderSessionList(sessions) {
+    const $list = $('#session-list');
+    $list.empty();
+    if (!sessions || sessions.length === 0) {
+        $list.append('<div class="session-list-empty">هیچ گفتگویی وجود ندارد</div>');
+        return;
+    }
+    sessions.forEach(s => {
+        const isActive = s.session_id === sessionId;
+        const title = s.title || 'گفتگوی جدید';
+        const date = formatRelativeDate(s.last_active);
+        const $item = $(`
+            <div class="session-item${isActive ? ' active' : ''}" data-sid="${s.session_id}">
+                <div class="session-item-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                </div>
+                <div class="session-item-body">
+                    <div class="session-item-title">${$('<span>').text(title).html()}</div>
+                    <div class="session-item-date">${date}</div>
+                </div>
+                <div class="session-item-actions">
+                    <button class="session-action-btn rename" title="تغییر نام" data-sid="${s.session_id}" data-title="${$('<span>').text(title).html()}">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                    </button>
+                    <button class="session-action-btn delete" title="حذف" data-sid="${s.session_id}">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `);
+        $list.append($item);
+    });
+
+    // Events
+    $list.find('.session-item').on('click', function (e) {
+        if ($(e.target).closest('.session-action-btn').length) return;
+        const sid = $(this).data('sid');
+        switchSession(sid);
+    });
+    $list.find('.session-action-btn.rename').on('click', function (e) {
+        e.stopPropagation();
+        const sid = $(this).data('sid');
+        const title = $(this).data('title');
+        openRenameModal(sid, title);
+    });
+    $list.find('.session-action-btn.delete').on('click', function (e) {
+        e.stopPropagation();
+        const sid = $(this).data('sid');
+        deleteSession(sid);
+    });
+}
+
+async function switchSession(sid) {
+    if (sid === sessionId) { closeSidebar(); return; }
+    sessionId = sid;
+    localStorage.setItem('nerd_session_id', sessionId);
+    history.splice(0);
+    await loadChatHistory();
+    renderMessages();
+    renderSessionList(currentSessions);
+    closeSidebar();
+}
+
+function openRenameModal(sid, currentTitle) {
+    pendingRenameSessionId = sid;
+    $('#rename-input').val(currentTitle || '');
+    $('#rename-modal').removeAttr('hidden').show();
+    setTimeout(() => $('#rename-input').focus().select(), 50);
+}
+
+function closeRenameModal() {
+    $('#rename-modal').attr('hidden', true).hide();
+    pendingRenameSessionId = null;
+}
+
+async function confirmRename() {
+    const title = $('#rename-input').val().trim();
+    if (!title || !pendingRenameSessionId) return;
+    try {
+        const res = await fetch(`/api/sessions/${pendingRenameSessionId}/title`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        });
+        if (!res.ok) throw new Error('Failed');
+        // update local cache
+        const s = currentSessions.find(s => s.session_id === pendingRenameSessionId);
+        if (s) s.title = title;
+        localStorage.setItem('nerd_sessions_cache', JSON.stringify(currentSessions));
+        renderSessionList(currentSessions);
+    } catch (err) {
+        logger.error('Rename failed:', err.message);
+    }
+    closeRenameModal();
+}
+
+async function deleteSession(sid) {
+    if (!confirm('آیا مطمئنی که می‌خواهی این گفتگو را حذف کنی؟')) return;
+    try {
+        await fetch(`/api/sessions/${sid}`, { method: 'DELETE' });
+        currentSessions = currentSessions.filter(s => s.session_id !== sid);
+        localStorage.setItem('nerd_sessions_cache', JSON.stringify(currentSessions));
+        if (sid === sessionId) {
+            // switch to newest remaining or start fresh
+            if (currentSessions.length > 0) {
+                await switchSession(currentSessions[0].session_id);
+            } else {
+                sessionId = null;
+                localStorage.removeItem('nerd_session_id');
+                history.splice(0);
+                renderMessages();
+            }
+        }
+        renderSessionList(currentSessions);
+    } catch (err) {
+        logger.error('Delete failed:', err.message);
     }
 }
 
@@ -345,11 +521,15 @@ async function sendMessage(content) {
                 }
 
                 if (data.session_id) {
+                    const isNewSession = (sessionId === null || sessionId !== data.session_id);
                     sessionId = data.session_id;
                     localStorage.setItem('nerd_session_id', sessionId);
-                    // Link session to user
+                    // Link session to user, with title on first creation
                     if (userId) {
-                        linkSession(userId, sessionId);
+                        const titleForSession = isNewSession
+                            ? (content || '').slice(0, 40) || 'گفتگوی جدید'
+                            : null;
+                        linkSession(userId, sessionId, titleForSession);
                     }
                 }
 
@@ -438,6 +618,30 @@ $(document).ready(async function () {
         }
     });
 
+    // Sidebar events
+    $('#btn-sidebar-toggle').on('click', openSidebar);
+    $('#btn-sidebar-close').on('click', closeSidebar);
+    $('#sidebar-overlay').on('click', closeSidebar);
+    $('#btn-sidebar-new').on('click', () => {
+        sessionId = null;
+        localStorage.removeItem('nerd_session_id');
+        history.splice(0);
+        renderMessages();
+        setStatus('');
+        closeSidebar();
+    });
+
+    // Rename modal events
+    $('#rename-confirm').on('click', confirmRename);
+    $('#rename-cancel').on('click', closeRenameModal);
+    $('#rename-input').on('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); confirmRename(); }
+        if (e.key === 'Escape') closeRenameModal();
+    });
+    $(document).on('click', '#rename-modal.modal-overlay', function (e) {
+        if ($(e.target).is('#rename-modal')) closeRenameModal();
+    });
+
     // Chat events
     $('#btn-send').on('click', () => sendMessage());
     $('#btn-cancel').on('click', cancelRequest);
@@ -449,6 +653,7 @@ $(document).ready(async function () {
         history.splice(0);
         renderMessages();
         setStatus('');
+        if ($('#sidebar').hasClass('open')) renderSessionList(currentSessions);
     });
 
     $('#message-input').on('keydown', (e) => {

@@ -89,11 +89,22 @@ def _clean_html_to_text(html: str) -> str:
 
 async def _fetch_url(url: str) -> Optional[str]:
     headers = {"User-Agent": _user_agent, "Accept": "text/html"}
-    async with httpx.AsyncClient(timeout=_fetch_timeout, headers=headers) as client:
-        resp = await client.get(url, follow_redirects=True)
-        if resp.status_code != 200:
-            return None
-        return resp.text
+    try:
+        async with httpx.AsyncClient(timeout=_fetch_timeout, headers=headers) as client:
+            resp = await client.get(url, follow_redirects=True)
+            if resp.status_code != 200:
+                logger.warning(f"Fetch failed for {url}: HTTP {resp.status_code}")
+                return None
+            return resp.text
+    except httpx.TimeoutException:
+        logger.warning(f"Fetch timeout for {url} after {_fetch_timeout}s")
+        return None
+    except httpx.ConnectError as e:
+        logger.warning(f"Connection error fetching {url}: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Unexpected error fetching {url}: {e}")
+        return None
 
 
 async def search_web(query: str, num_results: int = 2) -> str:
@@ -107,16 +118,25 @@ async def search_web(query: str, num_results: int = 2) -> str:
 
     # فاز ۲: فچ لینک‌ها و پاک‌سازی متن
     async def fetch_one(item: Dict[str, Any]) -> Dict[str, Any]:
-        html = await _fetch_url(item["url"])
-        markdown = ""
-        if html:
-            markdown = await asyncio.to_thread(_clean_html_to_text, html)
-        return {
-            "url": item["url"],
-            "title": item.get("title", ""),
-            "snippet": item.get("snippet", ""),
-            "markdown": markdown,
-        }
+        try:
+            html = await _fetch_url(item["url"])
+            markdown = ""
+            if html:
+                markdown = await asyncio.to_thread(_clean_html_to_text, html)
+            return {
+                "url": item["url"],
+                "title": item.get("title", ""),
+                "snippet": item.get("snippet", ""),
+                "markdown": markdown,
+            }
+        except Exception as e:
+            logger.warning(f"Error processing {item['url']}: {e}")
+            return {
+                "url": item["url"],
+                "title": item.get("title", ""),
+                "snippet": item.get("snippet", ""),
+                "markdown": "",
+            }
 
     fetched = await asyncio.gather(*[fetch_one(item) for item in results])
 

@@ -43,7 +43,7 @@ MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "2048"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
-    "You are Nerd, a floating web ai guide. Answer concisely in Persian. Keep replies short and actionable. type in Markdown format",
+    "You are Nerd, a floating web ai guide & work assistant. Answer concisely in Persian. Keep replies short and actionable. type in Markdown format.",
 )
 STREAM_HEARTBEAT_SEC = int(os.getenv("STREAM_HEARTBEAT_SEC", "15"))
 MAX_TOOL_CALLS = int(os.getenv("MAX_TOOL_CALLS", "6"))
@@ -57,8 +57,6 @@ FORCE_SEARCH_KEYWORDS = [
     "آپدیت",
     "update",
     "latest",
-    "version",
-    "release",
     "imdb",
     "قیمت",
     "سن",
@@ -67,10 +65,7 @@ FORCE_SEARCH_KEYWORDS = [
     "داکیومنت",
     "documentation",
     "api",
-    "changelog",
     "news",
-    "os",
-    "system",
 ]
 
 TOOLS = [
@@ -888,10 +883,11 @@ async def get_user_sessions(user_id: str, raw_request: Request):
 
 @app.post("/api/sessions/link")
 async def link_session_to_user(raw_request: Request):
-    """Link a session_id to a user_id."""
+    """Link a session_id to a user_id, optionally setting a title."""
     body = await raw_request.json()
     user_id = body.get("user_id", "").strip()
     session_id = body.get("session_id", "").strip()
+    title = (body.get("title") or "").strip()
     if not user_id or not session_id:
         raise HTTPException(status_code=400, detail="user_id and session_id required")
 
@@ -902,8 +898,12 @@ async def link_session_to_user(raw_request: Request):
     )
     now = datetime.now().isoformat()
     if existing:
+        update_payload: Dict[str, Any] = {"last_active": now}
+        # Only set title if provided AND the existing record has no title yet
+        if title and not existing[0].get("title"):
+            update_payload["title"] = title
         sessions_table.update(
-            {"last_active": now},
+            update_payload,
             (sq.user_id == user_id) & (sq.session_id == session_id),
         )
     else:
@@ -911,10 +911,44 @@ async def link_session_to_user(raw_request: Request):
             {
                 "user_id": user_id,
                 "session_id": session_id,
+                "title": title or "گفتگوی جدید",
                 "created_at": now,
                 "last_active": now,
             }
         )
+    return {"status": "ok"}
+
+
+class RenameSessionRequest(BaseModel):
+    title: str
+
+
+@app.patch("/api/sessions/{session_id}/title")
+async def rename_session(
+    session_id: str, req: RenameSessionRequest, raw_request: Request
+):
+    """Rename a session."""
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title must not be empty")
+    sessions_table = raw_request.app.state.db.table("user_sessions")
+    sq = Query()
+    rows = sessions_table.search(sq.session_id == session_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Session not found")
+    sessions_table.update({"title": title}, sq.session_id == session_id)
+    return {"status": "ok", "session_id": session_id, "title": title}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str, raw_request: Request):
+    """Delete a session and all its messages."""
+    sessions_table = raw_request.app.state.db.table("user_sessions")
+    sq = Query()
+    sessions_table.remove(sq.session_id == session_id)
+    raw_request.app.state.messages_table.remove(sq.session_id == session_id)
+    raw_request.app.state.tools_table.remove(sq.session_id == session_id)
+    logger.info(f"[SESSION] Deleted session: {session_id}")
     return {"status": "ok"}
 
 

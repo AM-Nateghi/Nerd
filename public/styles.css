@@ -1,3 +1,9 @@
+/* ========== Font Definition ========== */
+@font-face {
+  font-family: "Estedad";
+  src: url("./Estedad[KSHD\,wght].woff2") format("woff2");
+}
+
 /* ========== Dark Theme (default) ========== */
 :root {
   --bg: #1a1a1f;
@@ -685,6 +691,185 @@ body {
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* ========== Sidebar Overlay ========== */
+#sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  animation: fadeIn 0.2s var(--ease);
+}
+#sidebar-overlay.active {
+  display: block;
+}
+
+/* ========== Sidebar ========== */
+#sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 288px;
+  z-index: 40;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.32s var(--ease);
+  overflow: hidden;
+}
+#sidebar.open {
+  transform: translateX(0);
+}
+
+#sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+#sidebar-new {
+  padding: 12px 12px 8px;
+  flex-shrink: 0;
+}
+.sidebar-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--border-hover);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.sidebar-new-btn:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ========== Session List ========== */
+#session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#session-list::-webkit-scrollbar {
+  width: 4px;
+}
+#session-list::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.15);
+  border-radius: 2px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+  position: relative;
+  group: true;
+}
+.session-item:hover {
+  background: var(--surface-2);
+}
+.session-item.active {
+  background: var(--accent-tint);
+  border: 1px solid var(--user-bubble-border);
+}
+
+.session-item-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.session-item.active .session-item-icon {
+  color: var(--accent);
+}
+
+.session-item-body {
+  flex: 1;
+  min-width: 0;
+}
+.session-item-title {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.session-item.active .session-item-title {
+  color: var(--accent);
+}
+.session-item-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.session-item-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.session-item:hover .session-item-actions {
+  display: flex;
+}
+
+.session-action-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+}
+.session-action-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.session-action-btn.delete:hover {
+  background: rgba(229, 80, 80, 0.15);
+  color: var(--danger);
+}
+
+.session-list-empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 /* ========== Responsive ========== */
