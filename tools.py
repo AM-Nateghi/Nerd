@@ -1,7 +1,10 @@
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 import asyncio
 import httpx
 import os
+import platform
+import re
 import trafilatura
 import logging
 
@@ -17,26 +20,96 @@ _user_agent = os.getenv(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 )
+# How many extra results to request from SearXNG to compensate for filtered-out ones.
+# e.g. if num_results=2 and multiplier=5, we ask for 10 then filter down to 2.
+_search_fetch_multiplier = int(os.getenv("SEARCH_FETCH_MULTIPLIER", "5"))
+_search_max_fetch = int(os.getenv("SEARCH_MAX_FETCH", "20"))  # hard cap sent to SearXNG
+
+# --- URL Blocklist ---
+# Hard-coded domains that return no useful text content (video/social/media platforms)
+_BLOCKED_DOMAINS_DEFAULT = {
+    # Video platforms
+    "youtube.com", "youtu.be", "aparat.com", "vimeo.com", "dailymotion.com",
+    "twitch.tv", "tiktok.com", "rumble.com", "odysee.com", "bitchute.com",
+    "filimo.com", "namava.ir", "telewebion.com",
+    # Pure social / short content
+    "instagram.com", "twitter.com", "x.com", "facebook.com",
+    "t.me", "telegram.me",
+    # Audio
+    "spotify.com", "soundcloud.com", "podcast.ir",
+    # Maps / image search
+    "maps.google.com", "google.com/maps",
+    # Download aggregators (usually paywalled or binary)
+    "4shared.com", "mediafire.com", "zippyshare.com", "uploadfiles.io",
+}
+
+# Extra domains from environment variable (comma-separated)
+_extra_blocked = os.getenv("BLOCKED_DOMAINS", "")
+_BLOCKED_DOMAINS: set = _BLOCKED_DOMAINS_DEFAULT | {
+    d.strip().lower() for d in _extra_blocked.split(",") if d.strip()
+}
+
+# File extensions that are not readable text
+_BLOCKED_EXTENSIONS_DEFAULT = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff",
+    ".mp4", ".mp3", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
+    ".pdf", ".docx", ".xlsx", ".pptx", ".zip", ".rar", ".7z", ".tar", ".gz",
+    ".exe", ".dmg", ".apk", ".deb", ".rpm",
+}
+_extra_ext = os.getenv("BLOCKED_EXTENSIONS", "")
+_BLOCKED_EXTENSIONS: set = _BLOCKED_EXTENSIONS_DEFAULT | {
+    e.strip().lower() for e in _extra_ext.split(",") if e.strip()
+}
+
+
+def _is_blocked_url(url: str) -> bool:
+    """Return True if this URL should be excluded from search results."""
+    try:
+        # Normalize
+        url_lower = url.lower().split("?")[0].split("#")[0]
+        # Check extension
+        if any(url_lower.endswith(ext) for ext in _BLOCKED_EXTENSIONS):
+            return True
+        # Extract domain (strip scheme)
+        domain = re.sub(r"^https?://", "", url_lower).split("/")[0]
+        # Remove port
+        domain = domain.split(":")[0]
+        # Check exact domain and parent domains (e.g. "sub.youtube.com" → blocked by "youtube.com")
+        parts = domain.split(".")
+        for i in range(len(parts) - 1):
+            candidate = ".".join(parts[i:])
+            if candidate in _BLOCKED_DOMAINS:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 async def _searxng_search(query: str, num_results: int) -> List[Dict[str, Any]]:
     try:
+        # Request more than needed so filtering still leaves enough usable results
+        fetch_count = min(num_results * _search_fetch_multiplier, _search_max_fetch)
         params = {
             "q": query,
             "format": "json",
             "language": "auto",
             "safesearch": 1,
-            "count": num_results,
+            "count": fetch_count,
         }
         async with httpx.AsyncClient(timeout=_searxng_timeout) as client:
             resp = await client.get(f"{_searxng_base_url}/search", params=params)
             resp.raise_for_status()
             data = resp.json()
-        results = data.get("results") or []
+        raw_results = data.get("results") or []
         cleaned = []
-        for item in results:
+        blocked_count = 0
+        for item in raw_results:
             url = item.get("url")
             if not url:
+                continue
+            if _is_blocked_url(url):
+                blocked_count += 1
+                logger.debug(f"Blocked URL filtered: {url}")
                 continue
             cleaned.append(
                 {
@@ -47,7 +120,10 @@ async def _searxng_search(query: str, num_results: int) -> List[Dict[str, Any]]:
             )
             if len(cleaned) >= num_results:
                 break
-        logger.info(f"SearXNG returned {len(cleaned)} results for query: {query}")
+        logger.info(
+            f"SearXNG: requested {fetch_count}, got {len(raw_results)}, "
+            f"filtered {blocked_count} blocked → {len(cleaned)} usable for query: {query}"
+        )
         return cleaned
     except httpx.ConnectError as e:
         logger.error(
@@ -158,4 +234,34 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
             query=arguments["query"], num_results=arguments.get("num_results", 2)
         )
 
+    if tool_name == "datetime":
+        return get_current_datetime()
+
+    if tool_name == "system_info":
+        return get_system_info()
+
     return f"Unknown tool: {tool_name}"
+
+
+def get_current_datetime() -> str:
+    """Returns the current local date and time with weekday info."""
+    now = datetime.now()
+    weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    weekdays_fa = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنج‌شنبه", "جمعه", "شنبه", "یکشنبه"]
+    return (
+        f"Current system date and time:\n"
+        f"- ISO: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"- Day of week: {weekdays[now.weekday()]} / {weekdays_fa[now.weekday()]}\n"
+        f"- Time zone: local (server)\n"
+    )
+
+
+def get_system_info() -> str:
+    """Returns basic information about the host OS and Python runtime."""
+    return (
+        f"Host system information:\n"
+        f"- OS: {platform.system()} {platform.release()} ({platform.version()})\n"
+        f"- Architecture: {platform.machine()}\n"
+        f"- Python: {platform.python_version()}\n"
+        f"- Processor: {platform.processor() or 'N/A'}\n"
+    )

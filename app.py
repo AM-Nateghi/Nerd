@@ -43,7 +43,31 @@ MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "2048"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
-    "You are Nerd, a floating web ai guide & work assistant. Answer concisely in Persian. Keep replies short and actionable. type in Markdown format.",
+    """You are Nerd — a professional floating AI work assistant specialized in software development, office productivity, and technical problem-solving.
+
+Core behavior rules:
+- Always reply to the user in Persian (Farsi), unless the user explicitly writes in another language.
+- Format all replies in clean Markdown (headers, bullets, code blocks where appropriate).
+- Be concise and actionable. Avoid unnecessary preamble or filler text.
+- You have access to tools: use them proactively without waiting to be asked.
+
+Tool usage policy:
+- `datetime`: use whenever the user asks about the current time, today's date, what day it is, or time-sensitive calculations.
+- `system_info`: use when the user asks about their OS, machine specs, or environment.
+- `search`: use for ANY of the following — up-to-date information, news, prices, software documentation, API references, error messages, library versions, how-to guides, or anything you are not certain about. Prefer searching over guessing.
+
+Search query rules (CRITICAL):
+- For programming, APIs, frameworks, error messages, tools, or official documentation: ALWAYS write the search query in English using precise technical keywords.
+  Example — user asks about a Python error → search: "Python ValueError invalid literal for int() fix"
+  Example — user asks about a library → search: "FastAPI streaming response example"
+- For local/regional topics specific to Iran (Persian news, local prices, Iranian services): Persian queries are acceptable.
+- Never use vague or conversational queries. Be specific and keyword-rich.
+
+Professional work domains you excel at:
+- Software development (Python, JavaScript, TypeScript, web, APIs, databases, DevOps)
+- Office productivity (documents, spreadsheets, task management)
+- Research and information retrieval
+- Explaining technical concepts clearly""",
 )
 STREAM_HEARTBEAT_SEC = int(os.getenv("STREAM_HEARTBEAT_SEC", "15"))
 MAX_TOOL_CALLS = int(os.getenv("MAX_TOOL_CALLS", "6"))
@@ -51,21 +75,43 @@ DB_PATH = os.getenv("CHAT_DB_PATH", "chat_history.json")
 SESSION_HISTORY_LIMIT = int(os.getenv("SESSION_HISTORY_LIMIT", "20"))
 
 FORCE_SEARCH_KEYWORDS = [
-    "امروز",
-    "الان",
-    "جدید",
-    "آپدیت",
-    "update",
-    "latest",
-    "imdb",
+    # Time-sensitive (Persian)
     "قیمت",
-    "سن",
     "نرخ",
+    "سن",
+    "ارز",
+    "دلار",
+    "بیتکوین",
+    "اخبار",
+    "خبر",
     "مستندات",
     "داکیومنت",
-    "documentation",
-    "api",
+    # Time-sensitive (English)
+    "update",
+    "latest",
+    "current",
+    "today",
+    "now",
+    "recent",
+    "new version",
+    "imdb",
     "news",
+    "price",
+    "cost",
+    # Technical lookup (should always search)
+    "documentation",
+    "docs",
+    "api",
+    "changelog",
+    "release",
+    "version",
+    "error",
+    "exception",
+    "traceback",
+    "fix",
+    "bug",
+    "how to",
+    "tutorial",
 ]
 
 TOOLS = [
@@ -73,24 +119,59 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search",
-            "description": "Searching for information on the web and getting the full content of pages when we need up-to-date information. Or need to search for concepts such as API-Documentations, Really Instant entities like prices, ages, reports, docs, or unknown things.",
+            "description": (
+                "Search the web and retrieve full page content. "
+                "Use this for: up-to-date information, software/API documentation, error message explanations, "
+                "library versions, tutorials, news, prices, ratings, or any fact you are not certain about. "
+                "IMPORTANT: Write queries in English for technical/programming topics. "
+                "Use Persian only for Iran-specific local topics. "
+                "Be specific and keyword-rich — avoid conversational or vague queries."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The search query string with keywords, questions, or phrases to search for.",
+                        "description": (
+                            "Precise search query. For programming/docs/errors: English technical keywords. "
+                            "Example: 'FastAPI background tasks example' not 'فست اپی چیه'. "
+                            "For local Persian topics: Persian is OK."
+                        ),
                     },
                     "num_results": {
                         "type": "integer",
-                        "description": "تعداد نتایج (پیش‌فرض: 2)",
+                        "description": "Number of results to return. Default 2, max 5. Use 3-5 for complex research topics.",
                         "default": 2,
                     },
                 },
                 "required": ["query"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "datetime",
+            "description": (
+                "Returns the current local date, time, and day of week from the server. "
+                "Use this whenever the user asks: what time is it, what day is today, "
+                "what is today's date, time-sensitive calculations, or scheduling questions."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "system_info",
+            "description": (
+                "Returns information about the host operating system, architecture, and Python version. "
+                "Use this when the user asks about their OS, machine specs, system environment, "
+                "or when troubleshooting environment-specific issues."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -324,10 +405,15 @@ async def chat(request: ChatRequest, raw_request: Request):
                 "role": "system",
                 "content": (
                     "Mandatory response policy:\n"
-                    "1) The final reply to the user must be in Persian only.\n"
-                    "2) If the question involves up-to-date info, software/OS versions, recent changes, people, prices, ratings (e.g., IMDb), news, or documentation/API, you MUST use the search tool before answering.\n"
-                    "3) If you are uncertain about coding details or docs, run search (multiple times if needed) until the result is reliable.\n"
-                    "4) Never guess about fresh data without relying on search results."
+                    "1) Final reply to the user MUST be in Persian only — no exceptions.\n"
+                    "2) Use the `datetime` tool immediately when the user asks about the current time or date.\n"
+                    "3) Use the `system_info` tool when the user asks about their OS or machine.\n"
+                    "4) Use the `search` tool BEFORE answering for: up-to-date facts, software versions, API docs, "
+                    "error messages, prices, news, ratings, or anything you are not 100% certain about.\n"
+                    "5) Search query language rule: for programming, frameworks, errors, docs → English technical keywords. "
+                    "For Iran-specific local content → Persian is acceptable.\n"
+                    "6) Never fabricate version numbers, API behavior, or current data. Search first.\n"
+                    "7) You may call multiple tools in sequence if needed to build a complete, reliable answer."
                 ),
             }
         )
@@ -440,11 +526,18 @@ async def chat(request: ChatRequest, raw_request: Request):
                         break
 
                     announcement_text = (
-                        "Tool status notice:\n"
-                        f"- Searches completed so far: {search_count}\n"
-                        f"- Search cap for this answer: {MAX_TOOL_CALLS}\n"
-                        "- If fresh data or documentation is needed, use search.\n"
-                        "- The final reply to the user must be in Persian only."
+                        "== Work Assistant — Tool Guidance ==\n"
+                        f"Searches completed: {search_count} / {MAX_TOOL_CALLS} allowed.\n\n"
+                        "Available tools and when to use them:\n"
+                        "  • search       → fresh/unknown info, docs, errors, versions, prices, news.\n"
+                        "    ↳ Query language: English for tech/programming topics; Persian for Iran-local topics only.\n"
+                        "    ↳ Be specific and keyword-rich. Never use vague or conversational queries.\n"
+                        "  • datetime     → user asks about current time, today's date, what day it is.\n"
+                        "  • system_info  → user asks about OS, machine, or environment.\n\n"
+                        "Reminders:\n"
+                        "  - Final reply MUST be in Persian.\n"
+                        "  - Do not guess about facts, versions, or live data — use search.\n"
+                        "  - You may chain multiple tool calls to get a complete answer."
                     )
 
                     payload = {
@@ -624,8 +717,9 @@ async def chat(request: ChatRequest, raw_request: Request):
                         "messages": normalize_upstream_messages(
                             conversation,
                             announcement=(
-                                announcement_text
-                                + "\n- You are now in final answer mode. Do not call tools."
+                                announcement_text + "\n\n== FINAL ANSWER MODE ==\n"
+                                "All tool calls are done. Now write the final, complete reply in Persian.\n"
+                                "Synthesize gathered information into a clear, well-structured Markdown response."
                             ),
                         ),
                         "stream": True,
